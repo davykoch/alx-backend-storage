@@ -14,7 +14,7 @@ def count_calls(method: Callable) -> Callable:
     """Decorator to count how many times a method is called"""
     @wraps(method)
     def wrapper(url):
-        key = f"count:{method.__qualname__}"
+        key = f"count:{url}"
         redis_client.incr(key)
         return method(url)
     return wrapper
@@ -46,8 +46,11 @@ def get_page(url: str) -> str:
 
 
 if __name__ == "__main__":
-    get_page('http://slowwly.robertomurray.co.uk')
-    print(redis_client.get("count:get_page"))
+    url = 'http://slowwly.robertomurray.co.uk'
+    print("Accessing URL for the first time...")
+    get_page(url)
+    print(f"Count after first access: {redis_client.get(f'count:{url}').decode('utf-8')}")
     time.sleep(11)
-    get_page('http://slowwly.robertomurray.co.uk')
-    print(redis_client.get("count:get_page"))
+    print("Accessing URL after expiration...")
+    get_page(url)
+    print(f"Count after second access: {redis_client.get(f'count:{url}').decode('utf-8')}")
