@@ -9,7 +9,6 @@ import time
 
 redis_client = redis.Redis()
 
-
 def count_calls(method: Callable) -> Callable:
     """Decorator to count how many times a method is called"""
     @wraps(method)
@@ -18,7 +17,6 @@ def count_calls(method: Callable) -> Callable:
         redis_client.incr(key)
         return method(url)
     return wrapper
-
 
 def cache_with_expiration(expiration: int):
     """Decorator to cache the result of a function with expiration"""
@@ -36,7 +34,6 @@ def cache_with_expiration(expiration: int):
         return wrapper
     return decorator
 
-
 @count_calls
 @cache_with_expiration(10)
 def get_page(url: str) -> str:
@@ -44,13 +41,29 @@ def get_page(url: str) -> str:
     response = requests.get(url)
     return response.text
 
-
 if __name__ == "__main__":
     url = 'http://slowwly.robertomurray.co.uk'
-    print("Accessing URL for the first time...")
-    get_page(url)
-    print(f"Count after first access: {redis_client.get(f'count:{url}').decode('utf-8')}")
+    google_url = 'http://google.com'
+    
+    # Accessing the slowwly URL for the first time
+    print("Accessing slowwly URL for the first time...")
+    print(get_page(url))
+    print(f"Count after first access (slowwly): {redis_client.get(f'count:{url}').decode('utf-8')}")
+    
+    # Accessing the google URL for the first time
+    print("Accessing Google URL for the first time...")
+    print(get_page(google_url))
+    print(f"Count after first access (Google): {redis_client.get(f'count:{google_url}').decode('utf-8')}")
+    
+    # Wait for more than the expiration time
     time.sleep(11)
-    print("Accessing URL after expiration...")
-    get_page(url)
-    print(f"Count after second access: {redis_client.get(f'count:{url}').decode('utf-8')}")
+    
+    # Accessing the slowwly URL after expiration
+    print("Accessing slowwly URL after expiration...")
+    print(get_page(url))
+    print(f"Count after second access (slowwly): {redis_client.get(f'count:{url}').decode('utf-8')}")
+    
+    # Accessing the google URL after expiration
+    print("Accessing Google URL after expiration...")
+    print(get_page(google_url))
+    print(f"Count after second access (Google): {redis_client.get(f'count:{google_url}').decode('utf-8')}")
