@@ -5,59 +5,49 @@ import redis
 import requests
 from functools import wraps
 from typing import Callable
-from datetime import timedelta
+import time
+
+redis_client = redis.Redis()
 
 
 def count_calls(method: Callable) -> Callable:
     """Decorator to count how many times a method is called"""
     @wraps(method)
-    def wrapper(self, *args, **kwargs):
-        key = method.__qualname__
-        self._redis.incr(key)
-        return method(self, *args, **kwargs)
+    def wrapper(url):
+        key = f"count:{method.__qualname__}"
+        redis_client.incr(key)
+        return method(url)
     return wrapper
 
 
-def call_history(method: Callable) -> Callable:
-    """Decorator to store the history of inputs and outputs"""
-    @wraps(method)
-    def wrapper(self, *args, **kwargs):
-        input_key = f"{method.__qualname__}:inputs"
-        output_key = f"{method.__qualname__}:outputs"
-        self._redis.rpush(input_key, str(args))
-        result = method(self, *args, **kwargs)
-        self._redis.rpush(output_key, str(result))
-        return result
-    return wrapper
+def cache_with_expiration(expiration: int):
+    """Decorator to cache the result of a function with expiration"""
+    def decorator(method: Callable) -> Callable:
+        @wraps(method)
+        def wrapper(url):
+            cache_key = f"cache:{url}"
+            cached_result = redis_client.get(cache_key)
+            if cached_result:
+                return cached_result.decode('utf-8')
+
+            result = method(url)
+            redis_client.setex(cache_key, expiration, result)
+            return result
+        return wrapper
+    return decorator
 
 
-class Cache:
-    """Cache class for storing web page content"""
-    def __init__(self):
-        """Initialize the Cache with a Redis client"""
-        self._redis = redis.Redis()
-        self._redis.flushdb()
-
-    @call_history
-    @count_calls
-    def get_page(self, url: str) -> str:
-        """Get the HTML content of a web page and cache it"""
-        # Check if the page is already in cache
-        cached_content = self._redis.get(url)
-        if cached_content:
-            return cached_content.decode('utf-8')
-
-        # If not in cache, fetch the page
-        response = requests.get(url)
-        content = response.text
-
-        # Cache the content for 10 seconds
-        self._redis.setex(url, timedelta(seconds=10), content)
-
-        return content
-
-
+@count_calls
+@cache_with_expiration(10)
 def get_page(url: str) -> str:
     """Obtain the HTML content of a particular URL and returns it"""
-    cache = Cache()
-    return cache.get_page(url)
+    response = requests.get(url)
+    return response.text
+
+
+if __name__ == "__main__":
+    get_page('http://slowwly.robertomurray.co.uk')
+    print(redis_client.get("count:get_page"))
+    time.sleep(11)
+    get_page('http://slowwly.robertomurray.co.uk')
+    print(redis_client.get("count:get_page"))
