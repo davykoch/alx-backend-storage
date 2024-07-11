@@ -1,83 +1,69 @@
-from datetime import datetime, timedelta
-from requests import get
+#!/usr/bin/env python3
+"""Module for caching web pages"""
 
-# Cache dictionary to store retrieved pages and access counts
-cache = {}
-cache_expiration = timedelta(seconds=10)
+import redis
+import requests
+from functools import wraps
+from typing import Callable
+import time
 
+redis_client = redis.Redis()
 
-def update_cache(url, content):
-    """
-    Updates the cache with the provided URL and content.
-    """
-    cache["data:{url}".format(url=url)] = content
-    cache["count:{url}".format(url=url)] = cache.get("count:{url}".format(url=0), 0) + 1
-    cache["expire:{url}".format(url=url)] = datetime.utcnow() + cache_expiration
-
-
-def get_page(url: str) -> str:
-    """
-    Retrieves the HTML content of a URL, using cache if available.
-
-    Args:
-        url: The URL to retrieve content from.
-
-    Returns:
-        The HTML content of the URL.
-    """
-
-    cache_key = "data:{url}".format(url=url)
-
-    # Check if data is cached and not expired
-    if cache_key in cache and datetime.utcnow() < cache.get("expire:{url}".format(url=url)):
-        return cache[cache_key]
-
-    # Fetch data if not cached or expired
-    response = get(url)
-    response.raise_for_status()  # Raise exception for non-2xx status codes
-
-    update_cache(url, response.text)
-    return response.text
-
-
-# Bonus: Decorator for caching functionality
-def cached(func):
-    """
-    Decorator to cache the results of a function.
-
-    Args:
-        func: The function to be decorated.
-
-    Returns:
-        A wrapped function with caching behavior.
-    """
-
-    def wrapper(*args, **kwargs):
-        url = args[0]  # Assuming the URL is the first argument
-        cache_key = "data:{url}".format(url=url)
-
-        if cache_key in cache and datetime.utcnow() < cache.get("expire:{url}".format(url=url)):
-            return cache[cache_key]
-
-        result = func(*args, **kwargs)
-        update_cache(url, result)
-        return result
-
+def count_calls(method: Callable) -> Callable:
+    """Decorator to count how many times a method is called"""
+    @wraps(method)
+    def wrapper(url):
+        key = f"count:{url}"
+        redis_client.incr(key)
+        return method(url)
     return wrapper
 
+def cache_with_expiration(expiration: int):
+    """Decorator to cache the result of a function with expiration"""
+    def decorator(method: Callable) -> Callable:
+        @wraps(method)
+        def wrapper(url):
+            cache_key = f"cache:{url}"
+            cached_result = redis_client.get(cache_key)
+            if cached_result:
+                return cached_result.decode('utf-8')
 
-# Example usage with decorator
-@cached
-def get_page_decorated(url: str) -> str:
-    """
-    Decorated version of get_page with caching behavior.
-    """
-    # Function body remains the same as get_page
-    return get(url).text
+            result = method(url)
+            redis_client.setex(cache_key, expiration, result)
+            return result
+        return wrapper
+    return decorator
 
+@count_calls
+@cache_with_expiration(10)
+def get_page(url: str) -> str:
+    """Obtain the HTML content of a particular URL and returns it"""
+    response = requests.get(url)
+    return response.text
 
-# Choose between using the function directly or the decorated version
-# page_content = get_page("http://slowwly.robertomurray.co.uk")
-page_content = get_page_decorated("http://slowwly.robertomurray.co.uk")
-
-print(page_content)
+if __name__ == "__main__":
+    url = 'http://slowwly.robertomurray.co.uk'
+    google_url = 'http://google.com'
+    
+    # Accessing the slowwly URL for the first time
+    print("Accessing slowwly URL for the first time...")
+    print(get_page(url))
+    print(f"Count after first access (slowwly): {redis_client.get(f'count:{url}').decode('utf-8')}")
+    
+    # Accessing the google URL for the first time
+    print("Accessing Google URL for the first time...")
+    print(get_page(google_url))
+    print(f"Count after first access (Google): {redis_client.get(f'count:{google_url}').decode('utf-8')}")
+    
+    # Wait for more than the expiration time
+    time.sleep(11)
+    
+    # Accessing the slowwly URL after expiration
+    print("Accessing slowwly URL after expiration...")
+    print(get_page(url))
+    print(f"Count after second access (slowwly): {redis_client.get(f'count:{url}').decode('utf-8')}")
+    
+    # Accessing the google URL after expiration
+    print("Accessing Google URL after expiration...")
+    print(get_page(google_url))
+    print(f"Count after second access (Google): {redis_client.get(f'count:{google_url}').decode('utf-8')}")
